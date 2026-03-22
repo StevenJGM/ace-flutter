@@ -31,19 +31,14 @@ class RegistroPage extends StatefulWidget {
 class _RegistroPageState extends State<RegistroPage> {
   final List<Registro> registros = [];
 
+  final ticketCtrl = TextEditingController(); // <-- Nuevo campo Ticket
   final lugarTrabajoCtrl = TextEditingController();
   final ciudadCtrl = TextEditingController();
   final detalleCtrl = TextEditingController();
 
-  // Horas Extras
-  List<bool> seleccionHoras = List.generate(9, (_) => false);
-  int horasExtrasSeleccionada = 1;
-
-  // Cliente
   final List<String> clientes = ['BG', 'BP', 'AGLAR'];
   String clienteSeleccionado = 'BG';
 
-  // Días de la semana
   final List<String> diasSemana = [
     'Lunes',
     'Martes',
@@ -55,20 +50,19 @@ class _RegistroPageState extends State<RegistroPage> {
   ];
   String diaSeleccionado = 'Lunes';
 
-  // Horario Desde/Hasta
   int desdeHora = 8;
-  String desdeMinuto = ":00";
+  String desdeMinuto = ":30";
   int hastaHora = 17;
-  String hastaMinuto = ":00";
+  String hastaMinuto = ":30";
 
   final List<int> horas = List.generate(24, (i) => i);
-  final List<String> minutos = [":00", ":30"];
+  final List<String> minutos = List.generate(
+      60, (i) => ":${i.toString().padLeft(2, '0')}"); // <-- Todos los minutos
 
   @override
   void initState() {
     super.initState();
     cargarRegistros();
-    seleccionHoras[0] = true; // Inicializar la primera hora extra seleccionada
   }
 
   // -------------------- PERSISTENCIA JSON --------------------
@@ -100,22 +94,43 @@ class _RegistroPageState extends State<RegistroPage> {
             .addAll(jsonList.map((item) => Registro.fromJson(item)).toList());
       });
     } catch (e) {
-      // Error al cargar registros, no hacer nada
+      // Error al cargar registros
     }
   }
   // -------------------------------------------------------------
 
-  double calcularTotalHoras() {
-    final desdeDate =
-        DateTime(0, 0, 0, desdeHora, int.parse(desdeMinuto.substring(1)));
-    final hastaDate =
-        DateTime(0, 0, 0, hastaHora, int.parse(hastaMinuto.substring(1)));
-    final diff = hastaDate.difference(desdeDate).inMinutes;
-    return diff / 60.0;
+  Map<String, double> calcularHoras(
+      String dia, DateTime desde, DateTime hasta) {
+    double horas50 = 0;
+    double horas100 = 0;
+    const inicioNormal = 8;
+    const inicioMin = 30;
+    const finNormal = 17;
+    const finMin = 30;
+
+    DateTime inicio =
+        DateTime(desde.year, desde.month, desde.day, inicioNormal, inicioMin);
+    DateTime fin =
+        DateTime(hasta.year, hasta.month, hasta.day, finNormal, finMin);
+
+    double totalHoras = hasta.difference(desde).inMinutes / 60.0;
+
+    if (dia == 'Sábado' || dia == 'Domingo') {
+      horas100 = totalHoras;
+    } else {
+      if (desde.isBefore(inicio)) {
+        horas50 += inicio.difference(desde).inMinutes / 60.0;
+      }
+      if (hasta.isAfter(fin)) {
+        horas50 += hasta.difference(fin).inMinutes / 60.0;
+      }
+    }
+    return {'50': horas50, '100': horas100};
   }
 
-  void agregarRegistro() {
-    if (lugarTrabajoCtrl.text.isEmpty ||
+  void agregarRegistro() async {
+    if (ticketCtrl.text.isEmpty ||
+        lugarTrabajoCtrl.text.isEmpty ||
         ciudadCtrl.text.isEmpty ||
         detalleCtrl.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,11 +139,27 @@ class _RegistroPageState extends State<RegistroPage> {
       return;
     }
 
-    final totalHoras = calcularTotalHoras();
+    // Validar que Ticket solo tenga números
+    if (!RegExp(r'^\d+$').hasMatch(ticketCtrl.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ticket solo puede contener números')),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final desde = DateTime(now.year, now.month, now.day, desdeHora,
+        int.parse(desdeMinuto.substring(1)));
+    final hasta = DateTime(now.year, now.month, now.day, hastaHora,
+        int.parse(hastaMinuto.substring(1)));
+
+    final totalHoras = hasta.difference(desde).inMinutes / 60.0;
+    final horasMap = calcularHoras(diaSeleccionado, desde, hasta);
 
     final registro = Registro(
       dia: diaSeleccionado,
-      fecha: DateTime.now(),
+      fecha: now,
+      ticket: ticketCtrl.text, // <-- Guardamos Ticket
       lugarTrabajo: lugarTrabajoCtrl.text,
       ciudad: ciudadCtrl.text,
       cliente: clienteSeleccionado,
@@ -136,28 +167,29 @@ class _RegistroPageState extends State<RegistroPage> {
       desde: "${desdeHora.toString().padLeft(2, '0')}${desdeMinuto}",
       hasta: "${hastaHora.toString().padLeft(2, '0')}${hastaMinuto}",
       totalHoras: totalHoras,
-      horasExtras: horasExtrasSeleccionada,
+      horasExtras: 0,
+      horas50: horasMap['50']!,
+      horas100: horasMap['100']!,
     );
 
     setState(() {
       registros.add(registro);
+      ticketCtrl.clear();
       lugarTrabajoCtrl.clear();
       ciudadCtrl.clear();
       detalleCtrl.clear();
-      seleccionHoras = List.generate(9, (_) => false);
-      horasExtrasSeleccionada = 1;
-      seleccionHoras[0] = true;
-      clienteSeleccionado = 'BG';
       diaSeleccionado = 'Lunes';
+      clienteSeleccionado = 'BG';
       desdeHora = 8;
-      desdeMinuto = ":00";
+      desdeMinuto = ":30";
       hastaHora = 17;
-      hastaMinuto = ":00";
+      hastaMinuto = ":30";
     });
 
-    guardarRegistros(); // Guardar automáticamente
+    await guardarRegistros();
   }
 
+  // -------------------- Generar Excel --------------------
   Future<void> generarExcel() async {
     if (registros.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -169,8 +201,9 @@ class _RegistroPageState extends State<RegistroPage> {
     var excel = Excel.createExcel();
     Sheet sheet = excel['Registros'];
 
-    // Encabezado reordenado
+    // Columnas: Ticket primero, luego resto
     sheet.appendRow([
+      TextCellValue('Ticket'),
       TextCellValue('Día'),
       TextCellValue('Fecha'),
       TextCellValue('Lugar de trabajo'),
@@ -179,12 +212,14 @@ class _RegistroPageState extends State<RegistroPage> {
       TextCellValue('Detalle'),
       TextCellValue('Desde'),
       TextCellValue('Hasta'),
+      TextCellValue('Horas 50%'),
+      TextCellValue('Horas 100%'),
       TextCellValue('Total de Horas'),
-      TextCellValue('Horas Extras'),
     ]);
 
     for (var r in registros) {
       sheet.appendRow([
+        TextCellValue(r.ticket),
         TextCellValue(r.dia),
         TextCellValue("${r.fecha.day}/${r.fecha.month}/${r.fecha.year}"),
         TextCellValue(r.lugarTrabajo),
@@ -193,30 +228,28 @@ class _RegistroPageState extends State<RegistroPage> {
         TextCellValue(r.detalle),
         TextCellValue(r.desde),
         TextCellValue(r.hasta),
+        DoubleCellValue(r.horas50),
+        DoubleCellValue(r.horas100),
         DoubleCellValue(r.totalHoras),
-        IntCellValue(r.horasExtras),
       ]);
     }
 
-    Directory? baseDir = await getExternalStorageDirectory();
-    if (baseDir == null) return;
-
-    String docPath = baseDir.path.split('Android')[0] + 'Documents';
-    final docDir = Directory(docPath);
+    Directory docDir = Directory("/storage/emulated/0/Documents");
     if (!await docDir.exists()) await docDir.create(recursive: true);
 
-    final filePath = "${docDir.path}/registros.xlsx";
+    final filePath = "${docDir.path}/registro.xlsx";
     final file = File(filePath);
 
     final bytes = excel.encode();
-    await file.writeAsBytes(bytes!);
+    if (bytes == null) return;
+
+    await file.writeAsBytes(bytes);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Archivo guardado en: $filePath')),
+      SnackBar(content: Text('Archivo Excel guardado en: $filePath')),
     );
   }
 
-  // -------------------- NUEVA FUNCION: BORRAR REGISTROS --------------------
   Future<void> borrarRegistros() async {
     final file = await _localFile;
 
@@ -224,26 +257,17 @@ class _RegistroPageState extends State<RegistroPage> {
       registros.clear();
     });
 
-    if (await file.exists()) {
-      await file.writeAsString('[]');
-    }
+    if (await file.exists()) await file.writeAsString('[]');
 
-    // Eliminar Excel si existe
-    Directory? baseDir = await getExternalStorageDirectory();
-    if (baseDir != null) {
-      String docPath = baseDir.path.split('Android')[0] + 'Documents';
-      final filePath = "$docPath/registros.xlsx";
-      final excelFile = File(filePath);
-      if (await excelFile.exists()) {
-        await excelFile.delete();
-      }
-    }
+    Directory docDir = Directory("/storage/emulated/0/Documents");
+    final filePath = "${docDir.path}/registro.xlsx";
+    final excelFile = File(filePath);
+    if (await excelFile.exists()) await excelFile.delete();
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Todos los registros han sido borrados')),
     );
   }
-  // -----------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +277,12 @@ class _RegistroPageState extends State<RegistroPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            TextField(
+              controller: ticketCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: "Ticket"),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
                 const Text('Día: ',
@@ -297,6 +327,7 @@ class _RegistroPageState extends State<RegistroPage> {
               decoration: const InputDecoration(labelText: "Detalle"),
             ),
             const SizedBox(height: 10),
+            // ---------------- Selector de Horas ----------------
             Row(
               children: [
                 const Text("Desde: "),
@@ -342,26 +373,6 @@ class _RegistroPageState extends State<RegistroPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            const Text('Horas Extras',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            ToggleButtons(
-              children: List.generate(
-                  9,
-                  (i) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('${i + 1}'),
-                      )),
-              isSelected: seleccionHoras,
-              onPressed: (i) {
-                setState(() {
-                  for (int j = 0; j < seleccionHoras.length; j++) {
-                    seleccionHoras[j] = j == i;
-                  }
-                  horasExtrasSeleccionada = i + 1;
-                });
-              },
-            ),
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: agregarRegistro,
@@ -386,9 +397,9 @@ class _RegistroPageState extends State<RegistroPage> {
                   final r = registros[index];
                   return ListTile(
                     title: Text(
-                        "${r.lugarTrabajo} - ${r.cliente} - Total: ${r.totalHoras}h"),
+                        "Ticket: ${r.ticket} - ${r.lugarTrabajo} - ${r.cliente} - Total: ${r.totalHoras}h"),
                     subtitle: Text(
-                        "${r.dia} | ${r.fecha.day}/${r.fecha.month}/${r.fecha.year} | ${r.ciudad} | ${r.detalle} | Desde: ${r.desde} | Hasta: ${r.hasta} | Horas Extras: ${r.horasExtras}"),
+                        "Ticket: ${r.ticket} | ${r.dia} | ${r.fecha.day}/${r.fecha.month}/${r.fecha.year} | ${r.ciudad} | ${r.detalle} | Desde: ${r.desde} | Hasta: ${r.hasta} | Horas 50%: ${r.horas50} | Horas 100%: ${r.horas100}"),
                   );
                 },
               ),
