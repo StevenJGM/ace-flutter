@@ -68,6 +68,7 @@ class _RegistroPageState extends State<RegistroPage> {
   void initState() {
     super.initState();
     cargarRegistros();
+    seleccionHoras[0] = true; // Inicializar la primera hora extra seleccionada
   }
 
   // -------------------- PERSISTENCIA JSON --------------------
@@ -215,6 +216,35 @@ class _RegistroPageState extends State<RegistroPage> {
     );
   }
 
+  // -------------------- NUEVA FUNCION: BORRAR REGISTROS --------------------
+  Future<void> borrarRegistros() async {
+    final file = await _localFile;
+
+    setState(() {
+      registros.clear();
+    });
+
+    if (await file.exists()) {
+      await file.writeAsString('[]');
+    }
+
+    // Eliminar Excel si existe
+    Directory? baseDir = await getExternalStorageDirectory();
+    if (baseDir != null) {
+      String docPath = baseDir.path.split('Android')[0] + 'Documents';
+      final filePath = "$docPath/registros.xlsx";
+      final excelFile = File(filePath);
+      if (await excelFile.exists()) {
+        await excelFile.delete();
+      }
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Todos los registros han sido borrados')),
+    );
+  }
+  // -----------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -341,6 +371,12 @@ class _RegistroPageState extends State<RegistroPage> {
             ElevatedButton(
               onPressed: generarExcel,
               child: const Text("Generar Excel"),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: borrarRegistros,
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text("Borrar registros"),
             ),
             const SizedBox(height: 20),
             Expanded(
